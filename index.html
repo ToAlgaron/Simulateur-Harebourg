@@ -33,8 +33,11 @@
     -webkit-mask-composite:source-in; mask-composite:intersect;
     mask-image:linear-gradient(to right,transparent 0,#000 14%,#000 86%,transparent 100%),linear-gradient(to bottom,transparent 0,#000 18%,#000 82%,transparent 100%); }
   canvas { display:block; width:100%; height:auto; cursor:crosshair; touch-action:manipulation; }
-  .pvs { position:absolute; top:14px; left:14px; z-index:2; display:flex; flex-wrap:wrap; align-items:center; gap:6px; max-width:calc(100% - 250px); }
-  .pvs span { color:var(--muted); font-weight:600; margin-right:4px; }
+  .ctrls { position:absolute; top:14px; left:14px; z-index:2; display:grid; gap:8px; max-width:calc(100% - 250px); }
+  .pvs { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+  .pvs span { color:var(--muted); font-weight:600; min-width:76px; }
+  #cacs { position:absolute; left:14px; bottom:14px; z-index:2; }
+  #cacs button { min-width:40px; text-align:center; }
   .pvs button { font:inherit; font-weight:600; font-size:.9rem; color:var(--text); cursor:pointer; padding:7px 11px; border-radius:10px;
     background:linear-gradient(180deg,#3d6567,var(--harebourg)); border:2px solid #acecf455; box-shadow:0 3px 10px #0007; transition:border-color .15s, background .15s, box-shadow .15s; }
   .pvs button:hover { border-color:var(--ice); }
@@ -64,12 +67,23 @@
 <main>
   <h1><span class="name">Comte Harebourg</span><i class="gem"></i><span class="sub">Calculateur de redirection</span><i class="line"></i></h1>
   <section class="board">
+    <div class="ctrls">
     <div class="pvs" id="pvs" role="group" aria-label="PV de ton personnage"><span>PV</span>
       <button type="button" data-i="0" class="on" aria-pressed="true">100–90 %</button>
       <button type="button" data-i="1" aria-pressed="false">89–75 %</button>
       <button type="button" data-i="2" aria-pressed="false">74–45 %</button>
       <button type="button" data-i="3" aria-pressed="false">44–30 %</button>
       <button type="button" data-i="4" aria-pressed="false">29–0 %</button>
+    </div>
+    </div>
+    <div class="pvs" id="cacs" role="group" aria-label="Coups au corps à corps">
+      <span>Coups cac</span>
+      <button type="button" data-i="0" class="on" aria-pressed="true">0</button>
+      <button type="button" data-i="1" aria-pressed="false">1</button>
+      <button type="button" data-i="2" aria-pressed="false">2</button>
+      <button type="button" data-i="3" aria-pressed="false">3</button>
+      <button type="button" data-i="4" aria-pressed="false">4</button>
+      <button type="button" data-i="5" aria-pressed="false">5</button>
     </div>
     <button class="mapbtn" id="mapBtn" type="button" aria-pressed="false"><span class="sw"><i></i></span><span id="mapLabel">Map vide</span></button>
     <div class="fade" id="fade"><canvas id="board" width="1200" height="720" aria-label="Grille isométrique"></canvas></div>
@@ -153,7 +167,7 @@
     empty:  { label:'Map vide',         tw:84,  th:38, rows:null },
     combat: { label:'Combat Harebourg', tw:84,  th:38, rows:COMBAT }
   };
-  let pvIndex = 0, map = MAPS.empty, ci = 0, cj = 0, player = null, boss = null;
+  let pvIndex = 0, cacCount = 0, map = MAPS.empty, ci = 0, cj = 0, player = null, boss = null;
 
   const iso = (i, j) => ({ x: cx + ((i - ci) - (j - cj)) * map.tw / 2, y: cy + ((i - ci) + (j - cj)) * map.th / 2 });
   function cell(i, j) {
@@ -183,13 +197,13 @@
   }
   function compute() {
     if (!player || !boss) return {};
-    const v = rotate(boss.x - player.x, boss.y - player.y, angles[pvIndex]);
+    const v = rotate(boss.x - player.x, boss.y - player.y, angles[pvIndex] - 90 * cacCount);
     const x = player.x + v.x, y = player.y + v.y, ch = cell(x, y);
     if (ch === ' ') return { reason: 'La case à viser sort de la zone.' };
     if (ch === '#') return { reason: 'La case à viser est dans un mur.' };
     if (ch === 'x') return { reason: 'La case à viser n\'est pas ciblable.' };
-    if ((x === player.x && y === player.y) || (x === boss.x && y === boss.y)) return { reason: 'La case à viser est occupée.' };
-    return { t: { x, y }, los: hasLos(player, { x, y }) && hasLos(player, boss) };
+    if (x === player.x && y === player.y) return { reason: 'La case à viser est occupée.' };
+    return { t: { x, y, onBoss: x === boss.x && y === boss.y }, los: hasLos(player, { x, y }) && hasLos(player, boss) };
   }
 
   function path(p, k) {
@@ -198,10 +212,17 @@
   }
   function tile(p, fill) { path(p, 1); ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = C.line; ctx.lineWidth = 1.2; ctx.stroke(); }
   // Case colorée très lisible : lueur et double contour (sombre + blanc)
-  function marker(p, col) {
-    path(p, 1); ctx.shadowColor = col; ctx.shadowBlur = 34; ctx.fillStyle = col; ctx.fill(); ctx.shadowBlur = 0;
+  // split = case visée qui est aussi celle de l'ennemi : moitié gauche rouge, moitié droite couleur de la cible
+  function marker(p, col, split) {
+    path(p, 1); ctx.shadowColor = col; ctx.shadowBlur = 34; ctx.fillStyle = split ? C.red : col; ctx.fill(); ctx.shadowBlur = 0;
+    if (split) { ctx.save(); path(p, 1); ctx.clip(); ctx.fillStyle = col; ctx.fillRect(p.x, p.y - map.th, map.tw, map.th * 2); ctx.restore(); }
     path(p, 1); ctx.lineJoin = 'round'; ctx.strokeStyle = '#0d1a1a'; ctx.lineWidth = 5; ctx.stroke();
     path(p, .88); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.stroke();
+    if (split) {
+      const h = map.th / 2 * .88;
+      ctx.beginPath(); ctx.moveTo(p.x, p.y - h); ctx.lineTo(p.x, p.y + h);
+      ctx.strokeStyle = '#0d1a1a'; ctx.lineWidth = 5; ctx.stroke(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+    }
   }
   // Mur : bloc de roche glacée
   function wall(p) {
@@ -223,12 +244,12 @@
       if (p.x < -map.tw || p.x > W + map.tw || p.y < -map.th * 2 || p.y > H + map.th) continue;
       if (ch === '#') { walls.push(p); continue; }
       if (ch === 'x') { tile(p, '#14121a'); continue; }
-      if (t && t.x === i && t.y === j) specials.push([p, los ? C.green : C.orange]);
+      if (t && t.x === i && t.y === j) specials.push([p, los ? C.green : C.orange, t.onBoss]);
       else if (player && player.x === i && player.y === j) specials.push([p, C.blue]);
       else if (boss && boss.x === i && boss.y === j) specials.push([p, C.red]);
       else tile(p, ((i + j) % 2 + 2) % 2 === 0 ? C.light : C.dark);
     }
-    specials.forEach(([p, col]) => marker(p, col));
+    specials.forEach(([p, col, split]) => marker(p, col, split));
     walls.forEach(wall);
     document.getElementById('warn').textContent = reason || '';
   }
@@ -259,12 +280,18 @@
   }
   canvas.addEventListener('click', e => place(e, 'player'));
   canvas.addEventListener('contextmenu', e => place(e, 'boss'));
-  document.getElementById('pvs').addEventListener('click', e => {
-    const b = e.target.closest('button'); if (!b) return;
-    pvIndex = Number(b.dataset.i);
-    document.querySelectorAll('#pvs button').forEach(x => { const on = Number(x.dataset.i) === pvIndex; x.classList.toggle('on', on); x.setAttribute('aria-pressed', on); });
-    draw();
-  });
+  // Chaque coup au corps à corps décale la confusion de 90° dans le sens anti-horaire (−90° dans le repère du calcul)
+  function bindGroup(id, set) {
+    const g = document.getElementById(id);
+    g.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      set(Number(b.dataset.i));
+      g.querySelectorAll('button').forEach(x => { const on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-pressed', on); });
+      draw();
+    });
+  }
+  bindGroup('pvs', v => pvIndex = v);
+  bindGroup('cacs', v => cacCount = v);
   document.getElementById('mapBtn').addEventListener('click', () => setMap(map.rows ? 'empty' : 'combat'));
   setMap('empty');
 })();
